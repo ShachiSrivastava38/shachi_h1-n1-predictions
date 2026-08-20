@@ -133,4 +133,8 @@ def predict():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # The werkzeug reloader registers signal handlers which may fail in some hosting
+    # environments or when running the app from a non-main thread (e.g., Streamlit
+    # or certain process managers). Disable the reloader to avoid the ValueError
+    # related to signal handling.
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
