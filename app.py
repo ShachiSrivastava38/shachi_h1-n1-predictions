@@ -1,16 +1,39 @@
+import os
+import logging
 import joblib
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, url_for
 import pandas as pd
+import urllib.request
 
 app = Flask(__name__)
 
+# Configure basic logging to stdout
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
 # Load the trained RandomForest model
-MODEL_PATH = "model.pkl"  # Rename your .pkl file to model.pkl or adjust path
+MODEL_PATH = os.getenv("MODEL_PATH", "model.pkl")  # Rename your .pkl file to model.pkl or adjust path
 try:
     model = joblib.load(MODEL_PATH)
+    logger.info("Model loaded from %s", MODEL_PATH)
 except Exception as e:
     model = None
-    print(f"Error loading model from {MODEL_PATH}: {e}")
+    logger.exception("Error loading model from %s: %s", MODEL_PATH, e)
+
+# Ensure static directory exists and a vaccine image is present for the UI
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+VACCINE_IMAGE_PATH = os.path.join(STATIC_DIR, "vaccine.png")
+if not os.path.exists(VACCINE_IMAGE_PATH):
+    try:
+        # Public domain / Wikimedia image as a fallback. Replace with your licensed asset if you have one.
+        urllib.request.urlretrieve(
+            "https://upload.wikimedia.org/wikipedia/commons/6/6a/Vaccine_injection.jpg",
+            VACCINE_IMAGE_PATH,
+        )
+        logger.info("Downloaded default vaccine image to %s", VACCINE_IMAGE_PATH)
+    except Exception:
+        logger.exception("Failed to download default vaccine image; UI will show broken image if none provided")
 
 # Explicit feature list expected by the model
 FEATURE_NAMES = [
@@ -56,7 +79,7 @@ HTML_TEMPLATE = """
     <title>H1N1 Vaccine Prediction API</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f7f6; }
-        .container { max-width: 700px; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .container { max-width: 900px; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         h2 { color: #333; }
         .form-group { margin-bottom: 12px; }
         label { display: inline-block; width: 220px; font-weight: bold; font-size: 0.9em; }
@@ -64,11 +87,17 @@ HTML_TEMPLATE = """
         button { margin-top: 15px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
         button:hover { background: #0056b3; }
         .result { margin-top: 20px; font-weight: bold; font-size: 1.1em; color: #28a745; }
+        .header { display:flex; align-items:center; justify-content:space-between; }
+        .header img { max-width:160px; border-radius:8px; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h2>H1N1 Vaccine Model Inference</h2>
+    <div class="header">
+        <h2>H1N1 Vaccine Model Inference</h2>
+        <!-- Vaccine image; place a file named static/vaccine.png in the repository (or the app will download a default) -->
+        <img src="{{ url_for('static', filename='vaccine.png') }}" alt="Vaccine Image" />
+    </div>
     <form method="POST" action="/predict">
         {% for feature in features %}
         <div class="form-group">
@@ -129,12 +158,25 @@ def predict():
         )
 
     except Exception as e:
+        logger.exception("Prediction error: %s", e)
         return jsonify({"error": str(e)}), 400
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    """Simple health endpoint for load balancers and monitoring."""
+    return jsonify({
+        "status": "ok",
+        "model_loaded": model is not None,
+        "model_path": MODEL_PATH if model is not None else None,
+    })
 
 
 if __name__ == "__main__":
     # The werkzeug reloader registers signal handlers which may fail in some hosting
-    # environments or when running the app from a non-main thread (e.g., Streamlit
-    # or certain process managers). Disable the reloader to avoid the ValueError
-    # related to signal handling.
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    # environments or when running the app from a non-main thread. Disable the reloader
+    # to avoid ValueError related to signal handling.
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", 5000))
+    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    app.run(host=host, port=port, debug=debug, use_reloader=False)
