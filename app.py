@@ -1,9 +1,9 @@
-import os
 import logging
-import joblib
-from flask import Flask, jsonify, render_template_string, request, url_for
-import pandas as pd
+import os
 import urllib.request
+import joblib
+import pandas as pd
+from flask import Flask, jsonify, render_template_string, request, url_for
 
 app = Flask(__name__)
 
@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 # Load the trained RandomForest model
-MODEL_PATH = os.getenv("MODEL_PATH", "model.pkl")  # Rename your .pkl file to model.pkl or adjust path
+MODEL_PATH = os.getenv("MODEL_PATH", "model.pkl")
 try:
     model = joblib.load(MODEL_PATH)
     logger.info("Model loaded from %s", MODEL_PATH)
@@ -25,17 +25,16 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 VACCINE_PNG_PATH = os.path.join(STATIC_DIR, "vaccine.png")
 VACCINE_SVG_PATH = os.path.join(STATIC_DIR, "vaccine.svg")
-# Prefer SVG if present; otherwise download PNG fallback
+
 if not os.path.exists(VACCINE_SVG_PATH) and not os.path.exists(VACCINE_PNG_PATH):
     try:
-        # Public domain / Wikimedia image as a fallback PNG. Replace with your licensed asset if you have one.
         urllib.request.urlretrieve(
             "https://upload.wikimedia.org/wikipedia/commons/6/6a/Vaccine_injection.jpg",
             VACCINE_PNG_PATH,
         )
         logger.info("Downloaded default vaccine image to %s", VACCINE_PNG_PATH)
     except Exception:
-        logger.exception("Failed to download default vaccine image; UI will show broken image if none provided")
+        logger.exception("Failed to download default vaccine image")
 
 # Explicit feature list expected by the model
 FEATURE_NAMES = [
@@ -81,37 +80,39 @@ HTML_TEMPLATE = """
     <title>H1N1 Vaccine Prediction API</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f7f6; }
-        .container { max-width: 900px; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .container { max-width: 900px; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin: auto; }
         h2 { color: #333; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .form-group { margin-bottom: 12px; }
-        label { display: inline-block; width: 220px; font-weight: bold; font-size: 0.9em; }
-        input { padding: 6px; width: 200px; }
-        button { margin-top: 15px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        label { display: block; font-weight: bold; font-size: 0.85em; margin-bottom: 3px; }
+        input { padding: 6px; width: 90%; border: 1px solid #ccc; border-radius: 4px; }
+        button { margin-top: 20px; padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; width: 100%; }
         button:hover { background: #0056b3; }
-        .result { margin-top: 20px; font-weight: bold; font-size: 1.1em; color: #28a745; }
-        .header { display:flex; align-items:center; justify-content:space-between; }
-        .header img { max-width:160px; border-radius:8px; }
+        .result { margin-top: 20px; padding: 15px; font-weight: bold; font-size: 1.2em; color: #155724; background-color: #d4edda; border-color: #c3e6cb; border-radius: 4px; text-align: center; }
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .header img { max-width: 140px; border-radius: 8px; }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
         <h2>H1N1 Vaccine Model Inference</h2>
-        <!-- Vaccine image prefers SVG; falls back to PNG if SVG is not present -->
-        <img src="{{ url_for('static', filename='vaccine.svg') if ("vaccine.svg" in config['STATIC_FOLDER_FILES'] ) else url_for('static', filename='vaccine.png') }}" alt="Vaccine Image" />
+        <img src="{{ url_for('static', filename=image_file) }}" alt="Vaccine Image" />
     </div>
     <form method="POST" action="/predict">
-        {% for feature in features %}
-        <div class="form-group">
-            <label for="{{ feature }}">{{ feature }}:</label>
-            <input type="text" id="{{ feature }}" name="{{ feature }}" value="0" required>
+        <div class="form-grid">
+            {% for feature in features %}
+            <div class="form-group">
+                <label for="{{ feature }}">{{ feature }}:</label>
+                <input type="text" id="{{ feature }}" name="{{ feature }}" value="0" required>
+            </div>
+            {% endfor %}
         </div>
-        {% endfor %}
         <button type="submit">Predict</button>
     </form>
     {% if prediction is not none %}
     <div class="result">
-        Prediction: {{ prediction }}
+        Prediction Output: {{ prediction }}
     </div>
     {% endif %}
 </div>
@@ -120,53 +121,56 @@ HTML_TEMPLATE = """
 """
 
 
-@app.context_processor
-def inject_static_files():
-    # Helper to list files in static/ so template can decide which image exists
-    try:
-        files = os.listdir(os.path.join(os.path.dirname(__file__), 'static'))
-    except Exception:
-        files = []
-    return dict(STATIC_FOLDER_FILES=files)
-
-
 @app.route("/", methods=["GET"])
 def home():
-    return render_template_string(HTML_TEMPLATE, features=FEATURE_NAMES, prediction=None)
+    image_file = "vaccine.svg" if os.path.exists(VACCINE_SVG_PATH) else "vaccine.png"
+    return render_template_string(
+        HTML_TEMPLATE,
+        features=FEATURE_NAMES,
+        prediction=None,
+        image_file=image_file,
+    )
 
 
 @app.route("/predict", methods=["POST"])
 def predict():
     if model is None:
-        return jsonify({"error": "Model not loaded properly"}), 500
+        return jsonify({"error": "Model not loaded properly. Ensure model.pkl exists."}), 500
 
     try:
-        # Check if request is JSON or Web Form
+        # Check payload type
         if request.is_json:
             data = request.get_json()
-            df = pd.DataFrame([data])
         else:
             data = request.form.to_dict()
-            df = pd.DataFrame([data])
 
-        # Ensure all columns exist and maintain exact order
+        # Build DataFrame with proper column ordering
+        df = pd.DataFrame([data])
+
+        # Fill missing columns with 0
         for col in FEATURE_NAMES:
             if col not in df.columns:
                 df[col] = 0
 
         df = df[FEATURE_NAMES]
 
-        # Convert object columns to numeric where possible
-        df = df.apply(pd.to_numeric, errors="ignore")
+        # Explicitly convert strings to numeric values where applicable
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-        # Get prediction
+        # Predict outcome
         prediction = model.predict(df)[0]
+        prediction_val = int(prediction)
 
         if request.is_json:
-            return jsonify({"prediction": int(prediction)})
+            return jsonify({"prediction": prediction_val})
 
+        image_file = "vaccine.svg" if os.path.exists(VACCINE_SVG_PATH) else "vaccine.png"
         return render_template_string(
-            HTML_TEMPLATE, features=FEATURE_NAMES, prediction=int(prediction)
+            HTML_TEMPLATE,
+            features=FEATURE_NAMES,
+            prediction=prediction_val,
+            image_file=image_file,
         )
 
     except Exception as e:
@@ -176,7 +180,6 @@ def predict():
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Simple health endpoint for load balancers and monitoring."""
     return jsonify({
         "status": "ok",
         "model_loaded": model is not None,
@@ -185,9 +188,6 @@ def health():
 
 
 if __name__ == "__main__":
-    # The werkzeug reloader registers signal handlers which may fail in some hosting
-    # environments or when running the app from a non-main thread. Disable the reloader
-    # to avoid ValueError related to signal handling.
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 5000))
     debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
