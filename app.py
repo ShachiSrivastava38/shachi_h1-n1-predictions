@@ -23,15 +23,17 @@ except Exception as e:
 # Ensure static directory exists and a vaccine image is present for the UI
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
-VACCINE_IMAGE_PATH = os.path.join(STATIC_DIR, "vaccine.png")
-if not os.path.exists(VACCINE_IMAGE_PATH):
+VACCINE_PNG_PATH = os.path.join(STATIC_DIR, "vaccine.png")
+VACCINE_SVG_PATH = os.path.join(STATIC_DIR, "vaccine.svg")
+# Prefer SVG if present; otherwise download PNG fallback
+if not os.path.exists(VACCINE_SVG_PATH) and not os.path.exists(VACCINE_PNG_PATH):
     try:
-        # Public domain / Wikimedia image as a fallback. Replace with your licensed asset if you have one.
+        # Public domain / Wikimedia image as a fallback PNG. Replace with your licensed asset if you have one.
         urllib.request.urlretrieve(
             "https://upload.wikimedia.org/wikipedia/commons/6/6a/Vaccine_injection.jpg",
-            VACCINE_IMAGE_PATH,
+            VACCINE_PNG_PATH,
         )
-        logger.info("Downloaded default vaccine image to %s", VACCINE_IMAGE_PATH)
+        logger.info("Downloaded default vaccine image to %s", VACCINE_PNG_PATH)
     except Exception:
         logger.exception("Failed to download default vaccine image; UI will show broken image if none provided")
 
@@ -95,8 +97,8 @@ HTML_TEMPLATE = """
 <div class="container">
     <div class="header">
         <h2>H1N1 Vaccine Model Inference</h2>
-        <!-- Vaccine image; place a file named static/vaccine.png in the repository (or the app will download a default) -->
-        <img src="{{ url_for('static', filename='vaccine.png') }}" alt="Vaccine Image" />
+        <!-- Vaccine image prefers SVG; falls back to PNG if SVG is not present -->
+        <img src="{{ url_for('static', filename='vaccine.svg') if ("vaccine.svg" in config['STATIC_FOLDER_FILES'] ) else url_for('static', filename='vaccine.png') }}" alt="Vaccine Image" />
     </div>
     <form method="POST" action="/predict">
         {% for feature in features %}
@@ -116,6 +118,16 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
+
+
+@app.context_processor
+def inject_static_files():
+    # Helper to list files in static/ so template can decide which image exists
+    try:
+        files = os.listdir(os.path.join(os.path.dirname(__file__), 'static'))
+    except Exception:
+        files = []
+    return dict(STATIC_FOLDER_FILES=files)
 
 
 @app.route("/", methods=["GET"])
